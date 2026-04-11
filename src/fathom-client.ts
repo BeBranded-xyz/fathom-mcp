@@ -178,7 +178,7 @@ export class FathomClient {
     options: RequestInit = {}
   ): Promise<T> {
     const url = `${FATHOM_API_BASE}${endpoint}`;
-    
+
     const response = await fetch(url, {
       ...options,
       headers: {
@@ -190,7 +190,8 @@ export class FathomClient {
 
     if (!response.ok) {
       const errorText = await response.text();
-      throw new Error(`Fathom API error (${response.status}): ${errorText}`);
+      console.error(`Fathom API error (${response.status}): ${errorText}`);
+      throw new Error(`Fathom API error (${response.status})`);
     }
 
     // Handle 204 No Content
@@ -233,15 +234,17 @@ export class FathomClient {
   /**
    * Get all meetings (handles pagination automatically)
    */
-  async getAllMeetings(params: Omit<ListMeetingsParams, 'cursor'> = {}): Promise<Meeting[]> {
+  async getAllMeetings(params: Omit<ListMeetingsParams, 'cursor'> = {}, maxPages = 100): Promise<Meeting[]> {
     const allMeetings: Meeting[] = [];
     let cursor: string | null | undefined = undefined;
+    let pages = 0;
 
     do {
       const response = await this.listMeetings({ ...params, cursor: cursor || undefined });
       allMeetings.push(...response.items);
       cursor = response.next_cursor;
-    } while (cursor);
+      pages++;
+    } while (cursor && pages < maxPages);
 
     return allMeetings;
   }
@@ -257,22 +260,27 @@ export class FathomClient {
    * List all teams
    */
   async listTeams(cursor?: string): Promise<TeamsResponse> {
-    const endpoint = cursor ? `/teams?cursor=${cursor}` : '/teams';
+    const params = new URLSearchParams();
+    if (cursor) params.append('cursor', cursor);
+    const queryString = params.toString();
+    const endpoint = `/teams${queryString ? `?${queryString}` : ''}`;
     return this.request<TeamsResponse>(endpoint);
   }
 
   /**
    * Get all teams (handles pagination)
    */
-  async getAllTeams(): Promise<Team[]> {
+  async getAllTeams(maxPages = 100): Promise<Team[]> {
     const allTeams: Team[] = [];
     let cursor: string | null | undefined = undefined;
+    let pages = 0;
 
     do {
       const response = await this.listTeams(cursor || undefined);
       allTeams.push(...response.items);
       cursor = response.next_cursor;
-    } while (cursor);
+      pages++;
+    } while (cursor && pages < maxPages);
 
     return allTeams;
   }
@@ -294,15 +302,17 @@ export class FathomClient {
   /**
    * Get all team members (handles pagination)
    */
-  async getAllTeamMembers(team?: string): Promise<TeamMember[]> {
+  async getAllTeamMembers(team?: string, maxPages = 100): Promise<TeamMember[]> {
     const allMembers: TeamMember[] = [];
     let cursor: string | null | undefined = undefined;
+    let pages = 0;
 
     do {
       const response = await this.listTeamMembers(team, cursor || undefined);
       allMembers.push(...response.items);
       cursor = response.next_cursor;
-    } while (cursor);
+      pages++;
+    } while (cursor && pages < maxPages);
 
     return allMembers;
   }
@@ -321,7 +331,7 @@ export class FathomClient {
    * Delete a webhook
    */
   async deleteWebhook(webhookId: string): Promise<void> {
-    await this.request<void>(`/webhooks/${webhookId}`, {
+    await this.request<void>(`/webhooks/${encodeURIComponent(webhookId)}`, {
       method: 'DELETE',
     });
   }

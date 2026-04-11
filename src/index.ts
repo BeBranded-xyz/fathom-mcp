@@ -27,9 +27,22 @@ import * as path from 'path';
 
 // Get configuration from environment
 const API_KEY = process.env.FATHOM_API_KEY;
-const OUTPUT_DIR = process.env.FATHOM_OUTPUT_DIR 
+const OUTPUT_DIR = process.env.FATHOM_OUTPUT_DIR
   ? `${process.env.FATHOM_OUTPUT_DIR}/transcripts`
   : `${process.cwd()}/transcripts`;
+
+/**
+ * Validate that a resolved path is within the allowed base directory.
+ * Prevents path traversal attacks.
+ */
+function validateOutputDir(targetDir: string): string {
+  const resolved = path.resolve(targetDir);
+  const allowedBase = path.resolve(OUTPUT_DIR);
+  if (!resolved.startsWith(allowedBase + path.sep) && resolved !== allowedBase) {
+    throw new Error(`Output directory must be within ${allowedBase}`);
+  }
+  return resolved;
+}
 
 // Validate API key on startup
 if (!API_KEY) {
@@ -152,9 +165,17 @@ server.tool(
     output_dir: z.string().optional().describe('Directory to save the file (defaults to workspace/transcripts)'),
   },
   async ({ recording_id, output_dir }) => {
-    const targetDir = output_dir || OUTPUT_DIR;
+    let targetDir: string;
+    try {
+      targetDir = validateOutputDir(output_dir || OUTPUT_DIR);
+    } catch (e) {
+      return {
+        content: [{ type: 'text', text: `Invalid output directory: ${(e as Error).message}` }],
+        isError: true,
+      };
+    }
     console.error(`Exporting meeting ${recording_id} to ${targetDir}...`);
-    
+
     const response = await fathom.listMeetings({
       include_transcript: true,
       include_summary: true,
@@ -195,7 +216,15 @@ server.tool(
     output_dir: z.string().optional().describe('Directory to save files (defaults to workspace/transcripts)'),
   },
   async ({ created_after, created_before, output_dir }) => {
-    const targetDir = output_dir || OUTPUT_DIR;
+    let targetDir: string;
+    try {
+      targetDir = validateOutputDir(output_dir || OUTPUT_DIR);
+    } catch (e) {
+      return {
+        content: [{ type: 'text', text: `Invalid output directory: ${(e as Error).message}` }],
+        isError: true,
+      };
+    }
     console.error(`Exporting all meetings to ${targetDir}...`);
     
     const meetings = await fathom.getAllMeetings({
@@ -407,7 +436,10 @@ server.tool(
       triggered_for,
     });
 
-    const markdown = `# Webhook Created Successfully\n\n| Field | Value |\n|-------|-------|\n| **ID** | ${webhook.id} |\n| **URL** | ${webhook.url} |\n| **Secret** | \`${webhook.secret}\` |\n| **Include Transcript** | ${webhook.include_transcript} |\n| **Include Summary** | ${webhook.include_summary} |\n| **Include Action Items** | ${webhook.include_action_items} |\n| **Include CRM Matches** | ${webhook.include_crm_matches} |\n| **Triggered For** | ${webhook.triggered_for.join(', ')} |\n\n**Important:** Save the webhook secret securely - you'll need it to verify incoming webhooks.`;
+    const maskedSecret = webhook.secret
+      ? `${webhook.secret.slice(0, 4)}..${webhook.secret.slice(-4)}`
+      : 'N/A';
+    const markdown = `# Webhook Created Successfully\n\n| Field | Value |\n|-------|-------|\n| **ID** | ${webhook.id} |\n| **URL** | ${webhook.url} |\n| **Secret (masked)** | \`${maskedSecret}\` |\n| **Include Transcript** | ${webhook.include_transcript} |\n| **Include Summary** | ${webhook.include_summary} |\n| **Include Action Items** | ${webhook.include_action_items} |\n| **Include CRM Matches** | ${webhook.include_crm_matches} |\n| **Triggered For** | ${webhook.triggered_for.join(', ')} |\n\n**Important:** The full webhook secret was returned by Fathom's API. Retrieve it securely from your Fathom dashboard — it is not displayed here for security reasons.`;
 
     console.error(`Webhook created: ${webhook.id}`);
     return {
@@ -422,7 +454,7 @@ server.tool(
 server.tool(
   'delete_webhook',
   {
-    webhook_id: z.string().describe('The ID of the webhook to delete'),
+    webhook_id: z.string().regex(/^[\w-]+$/, 'Invalid webhook ID format').describe('The ID of the webhook to delete'),
   },
   async ({ webhook_id }) => {
     console.error(`Deleting webhook ${webhook_id}...`);

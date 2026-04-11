@@ -14,9 +14,10 @@ import type { Meeting, TranscriptItem, ActionItem, CalendarInvitee, CRMMatches }
 export function sanitizeFilename(name: string): string {
   return name
     .replace(/[<>:"/\\|?*]/g, '') // Remove invalid chars
+    .replace(/\.{2,}/g, '.')      // Collapse consecutive dots (prevent traversal)
     .replace(/\s+/g, '_')         // Replace spaces with underscores
     .replace(/_+/g, '_')          // Collapse multiple underscores
-    .replace(/^_|_$/g, '')        // Trim underscores from ends
+    .replace(/^[._]+|[._]+$/g, '')// Trim dots and underscores from ends
     .substring(0, 100);           // Limit length
 }
 
