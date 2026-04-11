@@ -8,8 +8,16 @@ import {
   formatActionItems,
   formatDate,
 } from '../src/formatters';
+import { apiKeyStore } from './request-context';
 
-export function registerTools(server: McpServer, fathom: FathomClient) {
+function getFathomClient(injectedClient?: FathomClient): FathomClient {
+  if (injectedClient) return injectedClient;
+  const apiKey = apiKeyStore.getStore();
+  if (!apiKey) throw new Error('No Fathom API key available in request context');
+  return new FathomClient(apiKey);
+}
+
+export function registerTools(server: McpServer, fathom?: FathomClient) {
   server.tool(
     'list_meetings',
     {
@@ -19,7 +27,7 @@ export function registerTools(server: McpServer, fathom: FathomClient) {
       include_external_only: z.boolean().optional().describe('Only include meetings with external participants'),
     },
     async ({ limit, created_after, created_before, include_external_only }) => {
-      const response = await fathom.listMeetings({
+      const response = await getFathomClient(fathom).listMeetings({
         created_after,
         created_before,
         calendar_invitees_domains_type: include_external_only ? 'one_or_more_external' : undefined,
@@ -46,7 +54,7 @@ export function registerTools(server: McpServer, fathom: FathomClient) {
       include_crm_matches: z.boolean().optional().describe('Include CRM matches (default: true)'),
     },
     async ({ recording_id, include_transcript, include_summary, include_action_items, include_crm_matches }) => {
-      const response = await fathom.listMeetings({
+      const response = await getFathomClient(fathom).listMeetings({
         include_transcript: include_transcript !== false,
         include_summary: include_summary !== false,
         include_action_items: include_action_items !== false,
@@ -73,7 +81,7 @@ export function registerTools(server: McpServer, fathom: FathomClient) {
       recording_id: z.number().describe('The recording ID of the meeting'),
     },
     async ({ recording_id }) => {
-      const response = await fathom.getTranscript(recording_id);
+      const response = await getFathomClient(fathom).getTranscript(recording_id);
       return {
         content: [{ type: 'text' as const, text: formatTranscriptToMarkdown(response.transcript) }],
       };
@@ -90,7 +98,7 @@ export function registerTools(server: McpServer, fathom: FathomClient) {
       created_before: z.string().optional().describe('ISO 8601 timestamp'),
     },
     async ({ participant_emails, domains, teams, created_after, created_before }) => {
-      const response = await fathom.listMeetings({
+      const response = await getFathomClient(fathom).listMeetings({
         calendar_invitees: participant_emails,
         calendar_invitees_domains: domains,
         teams,
@@ -115,7 +123,7 @@ export function registerTools(server: McpServer, fathom: FathomClient) {
       const meetingLimit = limit || 10;
 
       if (recording_id) {
-        const response = await fathom.listMeetings({ include_action_items: true });
+        const response = await getFathomClient(fathom).listMeetings({ include_action_items: true });
         const meeting = response.items.find(m => m.recording_id === recording_id);
 
         if (!meeting) {
@@ -135,7 +143,7 @@ export function registerTools(server: McpServer, fathom: FathomClient) {
           content: [{ type: 'text' as const, text: `## Action Items from: ${title}\n\n${formatActionItems(items)}` }],
         };
       } else {
-        const response = await fathom.listMeetings({ include_action_items: true });
+        const response = await getFathomClient(fathom).listMeetings({ include_action_items: true });
         const meetings = response.items.slice(0, meetingLimit);
 
         const sections: string[] = [];
@@ -167,7 +175,7 @@ export function registerTools(server: McpServer, fathom: FathomClient) {
     'list_teams',
     {},
     async () => {
-      const teams = await fathom.getAllTeams();
+      const teams = await getFathomClient(fathom).getAllTeams();
 
       if (teams.length === 0) {
         return { content: [{ type: 'text' as const, text: 'No teams found.' }] };
@@ -190,7 +198,7 @@ export function registerTools(server: McpServer, fathom: FathomClient) {
       team: z.string().optional().describe('Filter by team name'),
     },
     async ({ team }) => {
-      const members = await fathom.getAllTeamMembers(team);
+      const members = await getFathomClient(fathom).getAllTeamMembers(team);
 
       if (members.length === 0) {
         return {
@@ -218,7 +226,7 @@ export function registerTools(server: McpServer, fathom: FathomClient) {
       triggered_for: z.array(z.enum(['my_recordings', 'shared_external_recordings', 'my_shared_with_team_recordings', 'shared_team_recordings'])).optional().describe('Which recordings trigger the webhook'),
     },
     async ({ destination_url, include_transcript, include_summary, include_action_items, include_crm_matches, triggered_for }) => {
-      const webhook = await fathom.createWebhook({
+      const webhook = await getFathomClient(fathom).createWebhook({
         destination_url,
         include_transcript,
         include_summary,
@@ -244,7 +252,7 @@ export function registerTools(server: McpServer, fathom: FathomClient) {
       webhook_id: z.string().regex(/^[\w-]+$/, 'Invalid webhook ID format').describe('The ID of the webhook to delete'),
     },
     async ({ webhook_id }) => {
-      await fathom.deleteWebhook(webhook_id);
+      await getFathomClient(fathom).deleteWebhook(webhook_id);
       return {
         content: [{ type: 'text' as const, text: `Webhook ${webhook_id} deleted successfully.` }],
       };
