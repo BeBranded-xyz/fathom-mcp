@@ -1,51 +1,33 @@
 import { createMcpHandler, withMcpAuth } from 'mcp-handler';
 import { decrypt } from '@/lib/crypto';
 import { registerTools } from '@/lib/mcp-tools';
-import { apiKeyStore } from '@/lib/request-context';
 
 const handler = createMcpHandler(
   (server) => {
+    // Register tools without a FathomClient — they'll get the API key
+    // from extra.authInfo.token at call time (passed by the MCP transport)
     registerTools(server);
   },
   { serverInfo: { name: 'fathom-mcp', version: '1.0.0' } },
-  { maxDuration: 120 }
+  { maxDuration: 120, verboseLogs: true }
 );
 
-function getAuthedHandler() {
-  return withMcpAuth(
-    (req: Request) => {
-      const token = req.auth?.token;
-      if (!token) {
-        return new Response(JSON.stringify({ error: 'unauthorized' }), { status: 401 });
-      }
-      try {
-        const apiKey = decrypt(token);
-        return apiKeyStore.run(apiKey, () => handler(req));
-      } catch {
-        return new Response(JSON.stringify({ error: 'invalid_token' }), { status: 401 });
-      }
-    },
-    async (_req: Request, bearerToken?: string) => {
-      if (!bearerToken) return undefined;
-      try {
-        decrypt(bearerToken);
-        return { token: bearerToken, clientId: 'fathom-user', scopes: ['fathom'] };
-      } catch {
-        return undefined;
-      }
-    },
-    {
-      required: true,
-      resourceMetadataPath: '/.well-known/oauth-protected-resource',
+const authed = withMcpAuth(
+  handler,
+  async (_req: Request, bearerToken?: string) => {
+    if (!bearerToken) return undefined;
+    try {
+      decrypt(bearerToken); // validate it decrypts
+      return { token: bearerToken, clientId: 'fathom-user', scopes: ['fathom'] };
+    } catch {
+      return undefined;
     }
-  );
-}
-
-let _authed: ReturnType<typeof getAuthedHandler> | null = null;
-function authed(req: Request) {
-  if (!_authed) _authed = getAuthedHandler();
-  return _authed(req);
-}
+  },
+  {
+    required: true,
+    resourceMetadataPath: '/.well-known/oauth-protected-resource',
+  }
+);
 
 export { authed as GET, authed as POST, authed as DELETE };
 
